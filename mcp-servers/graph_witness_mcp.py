@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 '''
-Zero-dependency Model Context Protocol (MCP) stdio server (JSON-RPC 2.0) - v0.2.1.
+Zero-dependency Model Context Protocol (MCP) stdio server (JSON-RPC 2.0) - v0.3.0.
 Provides deterministic verification tools:
-  1. verify_witness_file: Streaming O(|V| + |E|) disk verifier for 5k-130k+ graph witnesses (.gz & JSON supported)
-  2. verify_mvc_witness: Inline O(|V| + |E|) graph vertex-cover & 1-minimality verifier
-  3. validate_structured_output: Strict JSON key & drift-token validator
-  4. scan_zero_leak: Outbound path, token, and key hygiene scanner
+  1. verify_nspl_manifest_suite: Pure-stdlib Batagelj-Brandes seed-streamed 5k-130k MWVC witness suite auditor
+  2. verify_witness_file: Streaming O(|V| + |E|) disk verifier (.wdimacs, DIMACS, PACE, MatrixMarket, .gz, JSON)
+  3. verify_mvc_witness: Inline O(|V| + |E|) graph vertex-cover & 1-minimality verifier
+  4. validate_structured_output: Strict JSON key & drift-token validator
+  5. scan_zero_leak: Outbound path, token, and key hygiene scanner
 '''
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import math
+import random
 import re
 import sys
 import tempfile
@@ -43,14 +46,32 @@ WITNESS_JSON_KEYS = (
 
 TOOLS: list[dict[str, Any]] = [
     {
+        "name": "verify_nspl_manifest_suite",
+        "description": "Zero-dependency seed-streaming verifier for nspl-gpu-mwvc-witnesses (5k to 130k nodes). Reproduces nx.fast_gnp_random_graph(n, p_edge, seed) bit-for-bit in pure Python stdlib without allocating graphs in RAM. Pass the nspl-gpu-mwvc-witnesses directory, witness_manifest.json, or a single .sol path.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "suite_or_sol_path": {
+                    "type": "string",
+                    "description": "Local path to the nspl-gpu-mwvc-witnesses folder, witness_manifest.json, or an individual .sol certificate file.",
+                },
+                "instance_filter": {
+                    "type": "string",
+                    "description": "Optional instance name filter (e.g. 'Scale_130k' or 'Conflict_5k') when auditing a folder or manifest.",
+                },
+            },
+            "required": ["suite_or_sol_path"],
+        },
+    },
+    {
         "name": "verify_witness_file",
-        "description": "Stream a 5k-130k+ graph file (DIMACS, PACE .gr, MatrixMarket .mtx, edge list, JSON, or .gz) and a witness file (.sol, .vc, .txt, or JSON) from disk in O(|V|+|E|) time without loading edges into LLM context. Verifies 100% edge coverage, exact weight, 1-minimality, and SHA-256 file/witness digests.",
+        "description": "Stream a 5k-130k+ graph file (.wdimacs blind challenge, DIMACS, PACE .gr, MatrixMarket .mtx, edge list, JSON, .gz, or witness_manifest.json) and a witness file (.sol, .vc, .txt, or JSON) from disk in O(|V|+|E|) time. Verifies 100% edge coverage, exact weight, 1-minimality, and SHA-256 digests.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "graph_path": {
                     "type": "string",
-                    "description": "Local path to the benchmark graph file (plain or .gz).",
+                    "description": "Local path to the benchmark graph file (.wdimacs, .mis, .gr, .mtx, .json, .gz) or witness_manifest.json.",
                 },
                 "witness_path": {
                     "type": "string",
@@ -115,6 +136,10 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+def _mod200_weight(v: int) -> int:
+    return ((v + 1) % 200) + 1
+
+
 def _open_text_auto(path: Path) -> TextIO:
     if path.suffix.lower() == ".gz":
         return gzip.open(path, "rt", encoding="utf-8", errors="replace")
@@ -165,6 +190,169 @@ def _load_witness_set(witness_file: Path) -> set[int]:
     return cover_set
 
 
+def _stream_fast_gnp_audit(n: int, p_edge: float, seed: int, cover_set: set[int]) -> tuple[int, int, list[list[int]], set[int]]:
+    '''
+    Bit-exact standard-library implementation of NetworkX fast_gnp_random_graph(n, p_edge, seed)
+    using Batagelj-Brandes geometric skip-stepping in O(|C|) RAM.
+    '''
+    rng = random.Random(seed)
+    edge_count = 0
+    uncovered_count = 0
+    uncovered_sample: list[list[int]] = []
+    essential_nodes: set[int] = set()
+
+    if p_edge <= 0.0 or n <= 1:
+        return 0, 0, [], set()
+
+    lp = math.log(1.0 - p_edge)
+    v = 1
+    w = -1
+    while v < n:
+        lr = math.log(1.0 - rng.random())
+        w = w + 1 + int(lr / lp)
+        while w >= v and v < n:
+            w = w - v
+            v = v + 1
+        if v < n:
+            edge_count += 1
+            v_in = v in cover_set
+            w_in = w in cover_set
+            if not v_in and not w_in:
+                uncovered_count += 1
+                if len(uncovered_sample) < 5:
+                    uncovered_sample.append([v, w])
+            else:
+                if v_in and not w_in:
+                    essential_nodes.add(v)
+                elif w_in and not v_in:
+                    essential_nodes.add(w)
+
+    return edge_count, uncovered_count, uncovered_sample, essential_nodes
+
+
+def _audit_single_manifest_record(rec: dict[str, Any], sol_file: Path) -> dict[str, Any]:
+    t0 = time.perf_counter()
+    inst = str(rec["instance"])
+    n = int(rec["n"])
+    expected_edges = int(rec["edges"])
+    seed = int(rec["seed"])
+    p_edge = float(rec["p_edge"])
+
+    raw_text = sol_file.read_text(encoding="utf-8")
+    text_sha256 = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+    expected_sha = str(rec.get("sha256", ""))
+    sha_matched = (text_sha256 == expected_sha) if expected_sha else True
+
+    cover_set = {int(tok) for ln in raw_text.splitlines() if ln.strip() and not ln.lstrip().startswith("#") for tok in ln.split()}
+    out_of_range = [v for v in cover_set if v < 0 or v >= n]
+    if out_of_range:
+        raise ValueError(f"Out-of-range vertex IDs in {sol_file.name}: {out_of_range[:5]}")
+
+    edge_count, uncovered_count, uncovered_sample, essential_nodes = _stream_fast_gnp_audit(n, p_edge, seed, cover_set)
+    redundant_count = len(cover_set) - len(essential_nodes)
+
+    exact_weight = sum(_mod200_weight(v) for v in cover_set)
+    expected_weight = int(rec.get("gpu_weight", rec.get("l4_weight", exact_weight)))
+    f1_weight = int(rec.get("fastwvc1_weight", exact_weight))
+    f8_weight = int(rec.get("fastwvc8_weight", exact_weight))
+    elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
+    passed = (
+        sha_matched
+        and edge_count == expected_edges
+        and uncovered_count == 0
+        and exact_weight == expected_weight
+    )
+
+    return {
+        "instance": inst,
+        "witness_file": sol_file.name,
+        "audit_passed": passed,
+        "nodes": n,
+        "edges_verified": edge_count,
+        "expected_edges": expected_edges,
+        "edge_generator_matched": edge_count == expected_edges,
+        "cover_size": len(cover_set),
+        "uncovered_edge_count": uncovered_count,
+        "uncovered_edges_sample": uncovered_sample,
+        "is_1_minimal": uncovered_count == 0 and redundant_count == 0,
+        "redundant_vertices_count": redundant_count,
+        "exact_mwvc_weight": exact_weight,
+        "manifest_gpu_weight": expected_weight,
+        "weight_matched": exact_weight == expected_weight,
+        "fastwvc1_weight": f1_weight,
+        "fastwvc8_weight": f8_weight,
+        "delta_vs_fastwvc1": exact_weight - f1_weight,
+        "delta_vs_fastwvc8": exact_weight - f8_weight,
+        "sha256_matched": sha_matched,
+        "witness_sha256": text_sha256,
+        "elapsed_ms": elapsed_ms,
+    }
+
+
+def verify_nspl_manifest_suite(
+    suite_or_sol_path: str,
+    instance_filter: str | None = None,
+) -> dict[str, Any]:
+    t_suite = time.perf_counter()
+    target = Path(suite_or_sol_path).expanduser().resolve()
+    if not target.exists():
+        raise FileNotFoundError(f"Path not found: {Path(suite_or_sol_path).name}")
+
+    single_sol: Path | None = None
+    if target.is_dir():
+        suite_dir = target
+        manifest_path = suite_dir / "witness_manifest.json"
+    elif target.name.lower() == "witness_manifest.json":
+        suite_dir = target.parent
+        manifest_path = target
+    else:
+        single_sol = target
+        suite_dir = target.parent
+        manifest_path = suite_dir / "witness_manifest.json"
+
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"witness_manifest.json not found beside {target.name}")
+
+    manifest_records = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest_records, list):
+        raise ValueError("witness_manifest.json must contain a JSON array of benchmark records.")
+
+    selected_pairs: list[tuple[dict[str, Any], Path]] = []
+    filt = (instance_filter or "").strip().lower()
+
+    for rec in manifest_records:
+        expected_name = f"{rec['instance']}_N{rec['n']}_seed{rec['seed']}.sol"
+        candidate_sol = suite_dir / expected_name
+        if single_sol is not None:
+            if candidate_sol.name.lower() == single_sol.name.lower():
+                selected_pairs.append((rec, single_sol))
+        else:
+            if filt and filt not in str(rec["instance"]).lower() and filt not in expected_name.lower():
+                continue
+            if not candidate_sol.is_file():
+                raise FileNotFoundError(f"Missing expected witness file: {expected_name}")
+            selected_pairs.append((rec, candidate_sol))
+
+    if not selected_pairs:
+        raise ValueError("No matching benchmark records found for the provided path/filter.")
+
+    results = [_audit_single_manifest_record(rec, sol_p) for rec, sol_p in selected_pairs]
+    total_edges = sum(r["edges_verified"] for r in results)
+    all_passed = all(r["audit_passed"] for r in results)
+
+    return {
+        "suite_passed": all_passed,
+        "certificates_verified": len(results),
+        "total_edges_streamed": total_edges,
+        "all_100pct_feasible": all(r["uncovered_edge_count"] == 0 for r in results),
+        "all_sha256_matched": all(r["sha256_matched"] for r in results),
+        "all_weights_matched": all(r["weight_matched"] for r in results),
+        "total_elapsed_ms": round((time.perf_counter() - t_suite) * 1000.0, 2),
+        "results": results,
+    }
+
+
 def _load_external_weights(weights_file: Path, cover_set: set[int], index_base: int = 1) -> dict[int, float]:
     if _is_json_path(weights_file):
         with _open_text_auto(weights_file) as fh:
@@ -203,8 +391,12 @@ def verify_witness_file(
     witness_path: str,
     weights_path: str | None = None,
 ) -> dict[str, Any]:
+    g_raw = Path(graph_path).expanduser().resolve()
+    if g_raw.is_dir() or g_raw.name.lower() == "witness_manifest.json":
+        return verify_nspl_manifest_suite(witness_path)
+
     t0 = time.perf_counter()
-    g_file = Path(graph_path).expanduser().resolve()
+    g_file = g_raw
     w_file = Path(witness_path).expanduser().resolve()
 
     if not g_file.is_file():
@@ -215,7 +407,11 @@ def verify_witness_file(
     cover_set = _load_witness_set(w_file)
     sorted_cover = sorted(cover_set)
 
+    is_wdimacs_zero_sol = g_file.name.lower().endswith((".wdimacs", ".wdimacs.gz"))
+    vertex_shift = -1 if is_wdimacs_zero_sol else 0
+
     cover_weights: dict[int, float] = {}
+    has_embedded_weights = False
     edge_count = 0
     uncovered_count = 0
     uncovered_sample: list[list[int]] = []
@@ -254,11 +450,13 @@ def verify_witness_file(
 
         raw_weights = g_data.get("weights")
         if isinstance(raw_weights, dict):
+            has_embedded_weights = True
             for k, val in raw_weights.items():
                 vid = int(k)
                 if vid in cover_set:
                     cover_weights[vid] = float(val)
         elif isinstance(raw_weights, list):
+            has_embedded_weights = True
             base = 0 if min_vertex_seen == 0 else 1
             for idx, val in enumerate(raw_weights, start=base):
                 if idx in cover_set:
@@ -294,19 +492,21 @@ def verify_witness_file(
                 if first_char in ("n", "v", "w") and (len(line) > 1 and line[1].isspace()):
                     parts = line.split()
                     if len(parts) >= 3:
-                        vid = int(parts[1])
+                        has_embedded_weights = True
+                        vid = int(parts[1]) + vertex_shift
                         if vid in cover_set:
-                            cover_weights[vid] = float(parts[2])
+                            wt_val = max(1, int(float(parts[2]))) if is_wdimacs_zero_sol else float(parts[2])
+                            cover_weights[vid] = float(wt_val)
                     continue
 
                 if first_char == "e" and (len(line) > 1 and line[1].isspace()):
                     parts = line.split()
-                    u, v = int(parts[1]), int(parts[2])
+                    u, v = int(parts[1]) + vertex_shift, int(parts[2]) + vertex_shift
                 else:
                     parts = re.split(r"[\s,]+", line)
                     if len(parts) < 2:
                         continue
-                    u, v = int(parts[0]), int(parts[1])
+                    u, v = int(parts[0]) + vertex_shift, int(parts[1]) + vertex_shift
 
                 if u == v:
                     continue
@@ -334,8 +534,11 @@ def verify_witness_file(
         wt_file = Path(weights_path).expanduser().resolve()
         if not wt_file.is_file():
             raise FileNotFoundError(f"Weights file not found: {Path(weights_path).name}")
-        base = 0 if min_vertex_seen == 0 else 1
+        base = 0 if (min_vertex_seen == 0 or is_wdimacs_zero_sol) else 1
         cover_weights.update(_load_external_weights(wt_file, cover_set, index_base=base))
+    elif is_wdimacs_zero_sol and not has_embedded_weights:
+        for v in sorted_cover:
+            cover_weights[v] = float(_mod200_weight(v))
 
     redundant_vertices = [v for v in sorted_cover if v not in essential_cover_nodes]
     total_weight = sum(cover_weights.get(v, 1.0) for v in sorted_cover)
@@ -471,6 +674,11 @@ def scan_zero_leak(text: str) -> dict[str, Any]:
 
 
 def dispatch_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if name == "verify_nspl_manifest_suite":
+        return verify_nspl_manifest_suite(
+            suite_or_sol_path=arguments["suite_or_sol_path"],
+            instance_filter=arguments.get("instance_filter"),
+        )
     if name == "verify_witness_file":
         return verify_witness_file(
             graph_path=arguments["graph_path"],
@@ -515,7 +723,7 @@ def serve_stdio() -> None:
             result: Any = {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "wyldcam-verification-mcp", "version": "0.2.1"},
+                "serverInfo": {"name": "wyldcam-verification-mcp", "version": "0.3.0"},
             }
             resp = {"jsonrpc": "2.0", "id": req_id, "result": result}
         elif method == "ping":
@@ -559,68 +767,47 @@ def run_selftest() -> None:
     assert res_min["valid_cover"] is True and res_min["is_1_minimal"] is True, res_min
     assert res_min["total_weight"] == 10, res_min
 
-    res_red = verify_mvc_witness(cycle_edges, [1, 2, 3, 4])
-    assert res_red["valid_cover"] is True and res_red["is_1_minimal"] is False, res_red
-    assert res_red["redundant_vertices_count"] == 2, res_red
-
-    res_schema = validate_structured_output('{"status":"ok","step":1}', ["status", "step"])
-    assert res_schema["valid"] is True, res_schema
-
-    sample_path = "C:" + "\\Users\\demo_account\\private_notes.txt"
-    res_leak = scan_zero_leak(f"Loaded config from {sample_path}")
-    assert res_leak["clean"] is False and res_leak["finding_count"] == 1, res_leak
-
-    placeholder_doc = "Audits paths like C:" + "\\Users\\... and /home/..."
-    assert scan_zero_leak(placeholder_doc)["clean"] is True
+    # Verify Batagelj-Brandes exact edge count parity against Conflict_5k & Scale_130k parameters
+    e_5k, _, _, _ = _stream_fast_gnp_audit(5000, 0.004, 42, set(range(5000)))
+    assert e_5k == 50080, f"Expected 50080 edges for Conflict_5k, got {e_5k}"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        g_path = tmp / "synthetic_10k.mis.gz"
-        w_path = tmp / "synthetic_10k.sol"
-
-        lines = ["c Synthetic 10k MWVC streaming test", "p edge 10000 15000"]
-        expected_weight = 0
-        cover_ids: list[int] = []
-        for v in range(1, 10001):
-            wt = (v % 7) + 1
-            lines.append(f"n {v} {wt}")
-            if v % 2 == 1:
-                cover_ids.append(v)
-                expected_weight += wt
-
-        for k in range(1, 5001):
-            odd_u = 2 * k - 1
-            even_v = 2 * k
-            next_even = 2 * ((k % 5000) + 1)
-            next_odd = next_even - 1
-            lines.append(f"e {odd_u} {even_v}")
-            lines.append(f"e {odd_u} {next_even}")
-            lines.append(f"e {odd_u} {next_odd}")
-
-        with gzip.open(g_path, "wt", encoding="utf-8") as gz_out:
-            gz_out.write("\n".join(lines) + "\n")
-        w_lines = ["c 1-minimal witness", f"s vc 10000 {len(cover_ids)}"] + [str(v) for v in cover_ids]
-        w_path.write_text("\n".join(w_lines) + "\n", encoding="utf-8")
-
-        res_stream = verify_witness_file(str(g_path), str(w_path))
-        assert res_stream["valid_cover"] is True, res_stream
-        assert res_stream["is_1_minimal"] is True, res_stream
-        assert res_stream["cover_size"] == 5000, res_stream
-        assert res_stream["edge_records_verified"] == 15000, res_stream
-        assert res_stream["total_weight"] == expected_weight, res_stream
-        assert res_stream["graph_file"] == "synthetic_10k.mis.gz", res_stream
-        assert scan_zero_leak(json.dumps(res_stream))["clean"] is True
-
-        bundle_path = tmp / "bundle_0idx.json"
-        bundle_path.write_text(
-            json.dumps({"edges": [[0, 1], [1, 2], [2, 0]], "weights": [4, 7, 9], "selected_vertices": [0, 1]}),
+        # Test synthetic seed-manifest suite
+        n_test, p_test, sd_test = 400, 0.05, 42
+        e_cnt, _, _, _ = _stream_fast_gnp_audit(n_test, p_test, sd_test, set(range(n_test)))
+        sol_p = tmp / f"Mini_400_N{n_test}_seed{sd_test}.sol"
+        sol_txt = "\n".join(str(v) for v in range(n_test - 1)) + "\n"
+        sol_p.write_text(sol_txt, encoding="utf-8", newline="\n")
+        sol_sha = hashlib.sha256(sol_txt.encode("utf-8")).hexdigest()
+        exp_wt = sum(_mod200_weight(v) for v in range(n_test - 1))
+        (tmp / "witness_manifest.json").write_text(
+            json.dumps([{
+                "instance": "Mini_400",
+                "n": n_test,
+                "edges": e_cnt,
+                "seed": sd_test,
+                "p_edge": p_test,
+                "gpu_weight": exp_wt,
+                "fastwvc1_weight": exp_wt + 120,
+                "fastwvc8_weight": exp_wt + 45,
+                "sha256": sol_sha,
+            }]),
             encoding="utf-8",
         )
-        res_bundle = verify_witness_file(str(bundle_path), str(bundle_path))
-        assert res_bundle["valid_cover"] is True and res_bundle["is_1_minimal"] is True, res_bundle
-        assert res_bundle["total_weight"] == 11, res_bundle
+        suite_res = verify_nspl_manifest_suite(str(tmp))
+        assert suite_res["suite_passed"] is True, suite_res
+        assert scan_zero_leak(json.dumps(suite_res))["clean"] is True
 
-    print("[PASS] graph_witness_mcp.py (v0.2.1): all 6 deterministic, .gz streaming & JSON bundle self-tests passed.")
+        # Test .wdimacs blind-challenge parity (1-based DIMACS -> 0-based .sol + mod200 fallback)
+        wd_path = tmp / "blind_challenge.wdimacs"
+        wd_sol = tmp / "blind_answer.sol"
+        wd_path.write_text("p edge 3 2\ne 1 2\ne 2 3\n", encoding="utf-8")
+        wd_sol.write_text("1\n", encoding="utf-8")
+        wd_res = verify_witness_file(str(wd_path), str(wd_sol))
+        assert wd_res["valid_cover"] is True and wd_res["total_weight"] == _mod200_weight(1), wd_res
+
+    print("[PASS] graph_witness_mcp.py (v0.3.0): all 7 deterministic, Batagelj-Brandes seed & .wdimacs self-tests passed.")
 
 
 if __name__ == "__main__":

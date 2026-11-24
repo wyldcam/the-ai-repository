@@ -2,7 +2,7 @@
 
 [![Verification & Hygiene CI](https://github.com/wyldcam/the-ai-repository/actions/workflows/ci.yml/badge.svg)](https://github.com/wyldcam/the-ai-repository/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![MCP: v0.2.1 Ready](https://img.shields.io/badge/MCP-Multi--Client_Auto--Discovery-8b5cf6.svg)](./mcp-servers)
+[![MCP: v0.3.0 Ready](https://img.shields.io/badge/MCP-Multi--Client_Auto--Discovery-8b5cf6.svg)](./mcp-servers)
 [![Lineage: Est. 2011](https://img.shields.io/badge/Archive-2011_tAIR_(GPLv3)-6e7681.svg)](https://github.com/wyldcam/the-ai-repository/tree/legacy/2011-tair)
 
 Open-source hub for deterministic agent harnesses, zero-dependency Model Context Protocol (MCP) verification servers, zero-drift prompt contracts, and technical architecture briefs by [@wyldcam](https://github.com/wyldcam).
@@ -13,7 +13,7 @@ Open-source hub for deterministic agent harnesses, zero-dependency Model Context
 
 | Path | Type | Description |
 | :--- | :--- | :--- |
-| [`mcp-servers/graph_witness_mcp.py`](./mcp-servers/graph_witness_mcp.py) | **Python MCP Server (`v0.2.1`)** | Stdlib-only `stdio` MCP server with disk-streaming 5k-130k witness verification (including `.gz` & JSON bundles), inline graph checks, JSON contract validation, and zero-leak scanning |
+| [`mcp-servers/graph_witness_mcp.py`](./mcp-servers/graph_witness_mcp.py) | **Python MCP Server (`v0.3.0`)** | Stdlib-only `stdio` MCP server auditing seed-generated 5k-130k MWVC witness suites (`verify_nspl_manifest_suite`), `.wdimacs`/DIMACS disk-streaming graphs, JSON schemas, and zero-leak hygiene |
 | [`.mcp.json`](./.mcp.json) / [`.vscode/`](./.vscode/mcp.json) / [`.cursor/`](./.cursor/mcp.json) / [`.gemini/`](./.gemini/settings.json) | **Auto-Discovery Configs** | Turnkey workspace MCP configs for Claude Code, VS Code Copilot, Cursor, and Gemini CLI right on `git clone` |
 | [`scripts/repo_hygiene_gate.py`](./scripts/repo_hygiene_gate.py) | **CI & Pre-Commit Gate** | Repo-wide zero-leak scanner, binary/extension blocker, MCP config portability validator, and live `stdio` JSON-RPC handshake test |
 | [`prompts/zero-drift-pack/`](./prompts/zero-drift-pack) | **Prompt + Schema Pack** | State-pinned execution contract and strict JSON Schema (Draft 2020-12) preventing multi-turn LLM constraint drift |
@@ -24,16 +24,13 @@ Open-source hub for deterministic agent harnesses, zero-dependency Model Context
 
 ## Quick Start & "Verify With Your Own AI"
 
-Zero external packages required (Python 3.10+ standard library). Clone and open in **VS Code Copilot**, **Claude Code**, **Cursor**, or **Gemini CLI**—`wyldcam-verifier` auto-registers via the checked-in workspace configs:
+Zero external packages required (Python 3.10+ standard library—not even `networkx` needed). Clone and open in **VS Code Copilot**, **Claude Code**, **Cursor**, or **Gemini CLI**:
 
 ```bash
-# Run full repo hygiene gate, MCP stdio handshake, & 10k-node streaming self-tests
+# Run full repo hygiene gate, MCP stdio handshake, & deterministic self-tests
 python scripts/repo_hygiene_gate.py
 python mcp-servers/graph_witness_mcp.py --selftest
 python agents/deterministic_harness.py --selftest
-
-# Optional: install local Git pre-commit zero-leak & binary blocker
-python scripts/repo_hygiene_gate.py --install-hook
 
 # Inspect tools interactively in your browser (no paid LLM subscription required)
 npx -y @modelcontextprotocol/inspector python mcp-servers/graph_witness_mcp.py

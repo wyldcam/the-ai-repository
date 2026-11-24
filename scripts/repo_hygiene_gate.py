@@ -87,7 +87,7 @@ def _verify_mcp_stdio_handshake(repo_root: Path) -> None:
 
     list_resp = json.loads(lines[1])
     tool_names = {t["name"] for t in list_resp.get("result", {}).get("tools", [])}
-    expected_tools = {"verify_witness_file", "verify_mvc_witness", "validate_structured_output", "scan_zero_leak"}
+    expected_tools = {"verify_nspl_manifest_suite", "verify_witness_file", "verify_mvc_witness", "validate_structured_output", "scan_zero_leak"}
     if tool_names != expected_tools:
         raise AssertionError(f"Tool mismatch: expected {expected_tools}, got {tool_names}")
 
