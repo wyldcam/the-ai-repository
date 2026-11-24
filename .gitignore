@@ -1,6 +1,12 @@
 __pycache__/
+*.py[cod]
 .venv/
 .env
 node_modules/
 .DS_Store
-.vscode/
+.vscode/*
+!.vscode/mcp.json
+.cursor/*
+!.cursor/mcp.json
+.gemini/*
+!.gemini/settings.json

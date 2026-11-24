@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wyldcam-verifier": {
+      "command": "python",
+      "args": ["mcp-servers/graph_witness_mcp.py"]
+    }
+  }
+}

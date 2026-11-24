@@ -1,6 +1,7 @@
 # The AI Repository
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![MCP: v0.2.0 Ready](https://img.shields.io/badge/MCP-Multi--Client_Auto--Discovery-8b5cf6.svg)](./mcp-servers)
 [![Lineage: Est. 2011](https://img.shields.io/badge/Archive-2011_tAIR_(GPLv3)-6e7681.svg)](https://github.com/wyldcam/the-ai-repository/tree/legacy/2011-tair)
 [![Focus: Agentic AI & Verification](https://img.shields.io/badge/Focus-Agentic_AI_%26_Verification-10b981.svg)](https://github.com/wyldcam)
 
@@ -12,21 +13,25 @@ Open-source hub for deterministic agent harnesses, zero-dependency Model Context
 
 | Path | Type | Description |
 | :--- | :--- | :--- |
-| [`mcp-servers/graph_witness_mcp.py`](./mcp-servers/graph_witness_mcp.py) | **Python MCP Server** | Stdlib-only `stdio` MCP server exposing polynomial-time graph witness verification, JSON contract checks, and outbound secret/path leak scanning |
+| [`mcp-servers/graph_witness_mcp.py`](./mcp-servers/graph_witness_mcp.py) | **Python MCP Server (`v0.2.0`)** | Stdlib-only `stdio` MCP server with disk-streaming 5k-130k witness verification (`verify_witness_file`), inline graph checks, JSON contract validation, and zero-leak scanning |
+| [`.mcp.json`](./.mcp.json) / [`.vscode/`](./.vscode/mcp.json) / [`.cursor/`](./.cursor/mcp.json) / [`.gemini/`](./.gemini/settings.json) | **Auto-Discovery Configs** | Turnkey workspace MCP configs for Claude Code, VS Code Copilot, Cursor, and Gemini CLI right on `git clone` |
 | [`prompts/zero-drift-pack/`](./prompts/zero-drift-pack) | **Prompt + Schema Pack** | State-pinned execution contract and strict JSON Schema (Draft 2020-12) preventing multi-turn LLM constraint drift |
 | [`agents/deterministic_harness.py`](./agents/deterministic_harness.py) | **Python Harness** | Local-first wrapper enforcing schema invariants, bounded diagnostic retries, and outbound payload hygiene |
 | [`research/001-asymmetric-witness-verification.md`](./research/001-asymmetric-witness-verification.md) | **Tech Brief #001** | *Asymmetric Verification*: auditing NP-hard optimization certificates and agent outputs in $O(\|V\|+\|E\|)$ time without kernel disclosure |
 
 ---
 
-## Quick Start & Self-Tests
+## Quick Start & "Verify With Your Own AI"
 
-Zero external packages required (Python 3.10+ standard library):
+Zero external packages required (Python 3.10+ standard library). Clone and open in **VS Code Copilot**, **Claude Code**, **Cursor**, or **Gemini CLI**—`wyldcam-verifier` auto-registers via the checked-in workspace configs:
 
 ```bash
-# Run built-in verification & zero-leak self-tests
+# Run built-in deterministic & 10k-node streaming scale self-tests
 python mcp-servers/graph_witness_mcp.py --selftest
 python agents/deterministic_harness.py --selftest
+
+# Inspect tools interactively in your browser (no paid LLM subscription required)
+npx -y @modelcontextprotocol/inspector python mcp-servers/graph_witness_mcp.py
 
 # Pull just the Zero-Drift Prompt Pack into any project
 npx degit wyldcam/the-ai-repository/prompts/zero-drift-pack ./prompts/zero-drift-pack
