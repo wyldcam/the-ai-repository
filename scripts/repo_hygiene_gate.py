@@ -25,7 +25,7 @@ FORBIDDEN_EXTENSIONS = {
     ".pt", ".pth", ".onnx", ".safetensors", ".pem", ".key", ".pfx", ".p12",
 }
 FORBIDDEN_FILENAMES = {".env", ".env.local", ".env.production"}
-TRANSIENT_BUILDERS = {"setup_ci.py", "upgrade_v020.py", "seed_artifacts.py"}
+TRANSIENT_BUILDERS = {"setup_ci.py", "upgrade_v020.py", "seed_artifacts.py", "clean_and_read.py", "upgrade_v030.py"}
 MCP_CONFIG_PATHS = {".mcp.json", ".vscode/mcp.json", ".cursor/mcp.json", ".gemini/settings.json"}
 ABS_PATH_RE = re.compile(r"(^[A-Za-z]:[\\/]|^/(?:Users|home|root|opt|var)/)")
 MAX_FILE_BYTES = 1_048_576
@@ -127,6 +127,14 @@ def run_gate(repo_root: Path) -> int:
     for rel in rel_files:
         fpath = repo_root / rel
         if not fpath.is_file():
+            continue
+
+        if any(ord(ch) < 32 or (0xE000 <= ord(ch) <= 0xF8FF) for ch in rel):
+            violations.append(f"{repr(rel)}: corrupted/non-portable characters in filename")
+            continue
+
+        if "/" not in rel and fpath.stat().st_size == 0 and rel != ".nojekyll":
+            violations.append(f"{rel}: empty 0-byte file in repository root")
             continue
 
         if fpath.name.lower() in FORBIDDEN_FILENAMES:
