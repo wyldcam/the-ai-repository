@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wyldcam/the-ai-repository/prompts/zero-drift-pack/step_envelope.schema.json",
+  "title": "ZeroDriftStepEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "step_index",
+    "pinned_invariants",
+    "quarantined_assumptions",
+    "action",
+    "verification_evidence",
+    "status"
+  ],
+  "properties": {
+    "step_index": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pinned_invariants": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "quarantined_assumptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target", "summary"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["tool_call", "code_patch", "final_report", "halt_on_violation"]
+        },
+        "target": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "verification_evidence": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["in_progress", "complete", "blocked"]
+    }
+  }
+}

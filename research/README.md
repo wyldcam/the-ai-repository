@@ -1,3 +1,7 @@
-# Research & AI Ethics
+# Research & Technical Briefs
 
-Technical write-ups on open-source AI ethics, safety evaluations, and turnkey architectures.
+Concise architectural notes on deterministic verification, IP-safe benchmarking, and security-first AI systems.
+
+## Index
+
+- **[`001-asymmetric-witness-verification.md`](./001-asymmetric-witness-verification.md)** - *Asymmetric Verification: Auditing NP-Hard Optimization & Agentic Outputs Without Kernel Disclosure*
