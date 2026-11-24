@@ -1,0 +1,41 @@
+name: Verification & Hygiene CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Gate & Self-Tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run zero-leak, binary & MCP stdio protocol gate
+        run: python scripts/repo_hygiene_gate.py
+
+      - name: Run MCP verification & 10k-streaming self-tests
+        run: python mcp-servers/graph_witness_mcp.py --selftest
+
+      - name: Run deterministic agent harness self-tests
+        run: python agents/deterministic_harness.py --selftest

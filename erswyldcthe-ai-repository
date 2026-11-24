@@ -1,0 +1,53 @@
+[1mdiff --git a/research/VertexCoverSoundness.lean b/research/VertexCoverSoundness.lean[m
+[1mindex 493eac2..27749d4 100644[m
+[1m--- a/research/VertexCoverSoundness.lean[m
+[1m+++ b/research/VertexCoverSoundness.lean[m
+[36m@@ -1,36 +1,36 @@[m
+ /-[m
+   VertexCoverSoundness.lean[m
+   Formal specification of NP Vertex Cover feasibility and strict weight-monotone[m
+[31m-  redundancy pruning (matching `mcp-servers/graph_witness_mcp.py`).[m
+[32m+[m[32m  redundancy pruning (formalizing post-solve witness cover-preservation checks).[m
+   Zero external dependencies (pure Lean 4 core).[m
+ -/[m
+ [m
+ namespace NSPL.FormalAudit[m
+ [m
+ structure Graph (V : Type) where[m
+[31m-  edges : List (V × V)[m
+[32m+[m[32m  edges : List (V Ãƒâ€” V)[m
+ [m
+ def IsVertexCover {V : Type} [DecidableEq V] (G : Graph V) (C : List V) : Prop :=[m
+[31m-  ∀ e ∈ G.edges, e.1 ∈ C ∨ e.2 ∈ C[m
+[32m+[m[32m  Ã¢Ë†â‚¬ e Ã¢Ë†Ë† G.edges, e.1 Ã¢Ë†Ë† C Ã¢Ë†Â¨ e.2 Ã¢Ë†Ë† C[m
+ [m
+[31m-def coverWeight {V : Type} (w : V → Nat) (C : List V) : Nat :=[m
+[32m+[m[32mdef coverWeight {V : Type} (w : V Ã¢â€ â€™ Nat) (C : List V) : Nat :=[m
+   C.foldl (fun acc v => acc + w v) 0[m
+ [m
+ /-- Removing an element `u` whose neighbors are all already in `C` preserves edge coverage. -/[m
+ theorem erase_redundant_preserves_cover[m
+     {V : Type} [DecidableEq V] (G : Graph V) (C : List V) (u : V)[m
+     (hCov : IsVertexCover G C)[m
+[31m-    (hRed : ∀ e ∈ G.edges, (e.1 = u → e.2 ∈ C ∧ e.2 ≠ u) ∧ (e.2 = u → e.1 ∈ C ∧ e.1 ≠ u)) :[m
+[32m+[m[32m    (hRed : Ã¢Ë†â‚¬ e Ã¢Ë†Ë† G.edges, (e.1 = u Ã¢â€ â€™ e.2 Ã¢Ë†Ë† C Ã¢Ë†Â§ e.2 Ã¢â€°Â  u) Ã¢Ë†Â§ (e.2 = u Ã¢â€ â€™ e.1 Ã¢Ë†Ë† C Ã¢Ë†Â§ e.1 Ã¢â€°Â  u)) :[m
+     IsVertexCover G (C.erase u) := by[m
+   intro e he[m
+   rcases hCov e he with h1 | h2[m
+[31m-  · by_cases hu1 : e.1 = u[m
+[31m-    · obtain ⟨h2C, h2ne⟩ := (hRed e he).1 hu1[m
+[32m+[m[32m  Ã‚Â· by_cases hu1 : e.1 = u[m
+[32m+[m[32m    Ã‚Â· obtain Ã¢Å¸Â¨h2C, h2neÃ¢Å¸Â© := (hRed e he).1 hu1[m
+       exact Or.inr (List.mem_erase_of_ne h2ne |>.mpr h2C)[m
+[31m-    · exact Or.inl (List.mem_erase_of_ne hu1 |>.mpr h1)[m
+[31m-  · by_cases hu2 : e.2 = u[m
+[31m-    · obtain ⟨h1C, h1ne⟩ := (hRed e he).2 hu2[m
+[32m+[m[32m    Ã‚Â· exact Or.inl (List.mem_erase_of_ne hu1 |>.mpr h1)[m
+[32m+[m[32m  Ã‚Â· by_cases hu2 : e.2 = u[m
+[32m+[m[32m    Ã‚Â· obtain Ã¢Å¸Â¨h1C, h1neÃ¢Å¸Â© := (hRed e he).2 hu2[m
+       exact Or.inl (List.mem_erase_of_ne h1ne |>.mpr h1C)[m
+[31m-    · exact Or.inr (List.mem_erase_of_ne hu2 |>.mpr h2)[m
+[32m+[m[32m    Ã‚Â· exact Or.inr (List.mem_erase_of_ne hu2 |>.mpr h2)[m
+ [m
+ end NSPL.FormalAudit[m
+\ No newline at end of file[m

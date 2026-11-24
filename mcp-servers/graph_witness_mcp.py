@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 '''
-Zero-dependency Model Context Protocol (MCP) stdio server (JSON-RPC 2.0) - v0.2.0.
+Zero-dependency Model Context Protocol (MCP) stdio server (JSON-RPC 2.0) - v0.2.1.
 Provides deterministic verification tools:
-  1. verify_witness_file: Streaming O(|V| + |E|) disk verifier for 5k-130k+ graph witnesses
+  1. verify_witness_file: Streaming O(|V| + |E|) disk verifier for 5k-130k+ graph witnesses (.gz & JSON supported)
   2. verify_mvc_witness: Inline O(|V| + |E|) graph vertex-cover & 1-minimality verifier
   3. validate_structured_output: Strict JSON key & drift-token validator
   4. scan_zero_leak: Outbound path, token, and key hygiene scanner
@@ -10,6 +10,7 @@ Provides deterministic verification tools:
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import re
@@ -17,28 +18,39 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 FENCE = chr(96) * 3
 
 LEAK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("windows_user_path", re.compile(r"[A-Za-z]:[\\/]+Users[\\/]+[^\s,;]+", re.IGNORECASE)),
-    ("unix_home_path", re.compile(r"/(?:home|Users)/[A-Za-z0-9_.-]+")),
+    ("windows_user_path", re.compile(r"[A-Za-z]:[\\/]+Users[\\/]+[A-Za-z0-9_][^\s,;\x60\"']*", re.IGNORECASE)),
+    ("unix_home_path", re.compile(r"/(?:home|Users)/[A-Za-z0-9_][A-Za-z0-9_.-]*")),
     ("api_token", re.compile(r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|AKIA[0-9A-Z]{16})\b")),
     ("private_key_header", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("dotenv_secret", re.compile(r"(?m)^[A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|API_KEY)\s*=\s*\S+")),
 ]
 
+WITNESS_JSON_KEYS = (
+    "cover",
+    "vertices",
+    "witness",
+    "solution",
+    "cover_vertices",
+    "selected_vertices",
+    "vertex_cover",
+    "nodes",
+)
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "verify_witness_file",
-        "description": "Stream a 5k-130k+ graph file (DIMACS, PACE .gr, MatrixMarket .mtx, edge list, or JSON) and a witness file (.sol, .vc, .txt, or JSON) from disk in O(|V|+|E|) time without loading edges into LLM context. Verifies 100% edge coverage, exact weight, 1-minimality, and SHA-256 file/witness digests.",
+        "description": "Stream a 5k-130k+ graph file (DIMACS, PACE .gr, MatrixMarket .mtx, edge list, JSON, or .gz) and a witness file (.sol, .vc, .txt, or JSON) from disk in O(|V|+|E|) time without loading edges into LLM context. Verifies 100% edge coverage, exact weight, 1-minimality, and SHA-256 file/witness digests.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "graph_path": {
                     "type": "string",
-                    "description": "Local path to the benchmark graph file.",
+                    "description": "Local path to the benchmark graph file (plain or .gz).",
                 },
                 "witness_path": {
                     "type": "string",
@@ -103,6 +115,17 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+def _open_text_auto(path: Path) -> TextIO:
+    if path.suffix.lower() == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+    return path.open("r", encoding="utf-8", errors="replace")
+
+
+def _is_json_path(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith(".json") or name.endswith(".json.gz")
+
+
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
@@ -115,18 +138,19 @@ def _sha256_file(path: Path) -> str:
 
 
 def _load_witness_set(witness_file: Path) -> set[int]:
-    if witness_file.suffix.lower() == ".json":
-        raw = json.loads(witness_file.read_text(encoding="utf-8"))
+    if _is_json_path(witness_file):
+        with _open_text_auto(witness_file) as fh:
+            raw = json.load(fh)
         if isinstance(raw, list):
             return {int(v) for v in raw}
         if isinstance(raw, dict):
-            for key in ("cover", "vertices", "witness", "solution"):
+            for key in WITNESS_JSON_KEYS:
                 if key in raw and isinstance(raw[key], list):
                     return {int(v) for v in raw[key]}
-        raise ValueError("JSON witness must be an array of vertex IDs or an object containing 'cover'.")
+        raise ValueError(f"JSON witness must be an array or an object containing one of {WITNESS_JSON_KEYS}.")
 
     cover_set: set[int] = set()
-    with witness_file.open("r", encoding="utf-8", errors="replace") as fh:
+    with _open_text_auto(witness_file) as fh:
         for raw_line in fh:
             line = raw_line.strip()
             if not line or line == "c" or line.startswith(("c ", "c\t", "#", "%", "//", "s ", "o ", "w ")):
@@ -141,18 +165,19 @@ def _load_witness_set(witness_file: Path) -> set[int]:
     return cover_set
 
 
-def _load_external_weights(weights_file: Path, cover_set: set[int]) -> dict[int, float]:
-    if weights_file.suffix.lower() == ".json":
-        raw = json.loads(weights_file.read_text(encoding="utf-8"))
+def _load_external_weights(weights_file: Path, cover_set: set[int], index_base: int = 1) -> dict[int, float]:
+    if _is_json_path(weights_file):
+        with _open_text_auto(weights_file) as fh:
+            raw = json.load(fh)
         if isinstance(raw, dict):
             return {int(k): float(v) for k, v in raw.items() if int(k) in cover_set}
         if isinstance(raw, list):
-            return {idx: float(w) for idx, w in enumerate(raw, start=1) if idx in cover_set}
+            return {idx: float(w) for idx, w in enumerate(raw, start=index_base) if idx in cover_set}
         raise ValueError("JSON weights file must be an object or array.")
 
     weights: dict[int, float] = {}
-    auto_index = 1
-    with weights_file.open("r", encoding="utf-8", errors="replace") as fh:
+    auto_index = index_base
+    with _open_text_auto(weights_file) as fh:
         for raw_line in fh:
             line = raw_line.strip()
             if not line or line == "c" or line.startswith(("c ", "c\t", "#", "%", "//", "p ")):
@@ -191,12 +216,6 @@ def verify_witness_file(
     sorted_cover = sorted(cover_set)
 
     cover_weights: dict[int, float] = {}
-    if weights_path:
-        wt_file = Path(weights_path).expanduser().resolve()
-        if not wt_file.is_file():
-            raise FileNotFoundError(f"Weights file not found: {Path(weights_path).name}")
-        cover_weights.update(_load_external_weights(wt_file, cover_set))
-
     edge_count = 0
     uncovered_count = 0
     uncovered_sample: list[list[int]] = []
@@ -204,22 +223,23 @@ def verify_witness_file(
     declared_vertices: int | None = None
     declared_edges: int | None = None
     max_vertex_seen = 0
+    min_vertex_seen: int | None = None
 
-    if g_file.suffix.lower() == ".json":
-        g_data = json.loads(g_file.read_text(encoding="utf-8"))
-        for k, val in (g_data.get("weights") or {}).items():
-            vid = int(k)
-            if vid in cover_set:
-                cover_weights[vid] = float(val)
-        for pair in g_data.get("edges") or []:
+    if _is_json_path(g_file):
+        with _open_text_auto(g_file) as fh:
+            g_data = json.load(fh)
+        raw_edges = g_data.get("edges") or []
+        for pair in raw_edges:
             u, v = int(pair[0]), int(pair[1])
             if u == v:
                 continue
             edge_count += 1
-            if u > max_vertex_seen:
-                max_vertex_seen = u
-            if v > max_vertex_seen:
-                max_vertex_seen = v
+            hi = u if u > v else v
+            lo = u if u < v else v
+            if hi > max_vertex_seen:
+                max_vertex_seen = hi
+            if min_vertex_seen is None or lo < min_vertex_seen:
+                min_vertex_seen = lo
             u_in = u in cover_set
             v_in = v in cover_set
             if not u_in and not v_in:
@@ -231,9 +251,21 @@ def verify_witness_file(
                     essential_cover_nodes.add(u)
                 if v_in and not u_in:
                     essential_cover_nodes.add(v)
+
+        raw_weights = g_data.get("weights")
+        if isinstance(raw_weights, dict):
+            for k, val in raw_weights.items():
+                vid = int(k)
+                if vid in cover_set:
+                    cover_weights[vid] = float(val)
+        elif isinstance(raw_weights, list):
+            base = 0 if min_vertex_seen == 0 else 1
+            for idx, val in enumerate(raw_weights, start=base):
+                if idx in cover_set:
+                    cover_weights[idx] = float(val)
     else:
         expect_mm_dims = False
-        with g_file.open("r", encoding="utf-8", errors="replace") as fh:
+        with _open_text_auto(g_file) as fh:
             for raw_line in fh:
                 line = raw_line.strip()
                 if not line:
@@ -279,10 +311,12 @@ def verify_witness_file(
                 if u == v:
                     continue
                 edge_count += 1
-                if u > max_vertex_seen:
-                    max_vertex_seen = u
-                if v > max_vertex_seen:
-                    max_vertex_seen = v
+                hi = u if u > v else v
+                lo = u if u < v else v
+                if hi > max_vertex_seen:
+                    max_vertex_seen = hi
+                if min_vertex_seen is None or lo < min_vertex_seen:
+                    min_vertex_seen = lo
 
                 u_in = u in cover_set
                 v_in = v in cover_set
@@ -295,6 +329,13 @@ def verify_witness_file(
                         essential_cover_nodes.add(u)
                     if v_in and not u_in:
                         essential_cover_nodes.add(v)
+
+    if weights_path:
+        wt_file = Path(weights_path).expanduser().resolve()
+        if not wt_file.is_file():
+            raise FileNotFoundError(f"Weights file not found: {Path(weights_path).name}")
+        base = 0 if min_vertex_seen == 0 else 1
+        cover_weights.update(_load_external_weights(wt_file, cover_set, index_base=base))
 
     redundant_vertices = [v for v in sorted_cover if v not in essential_cover_nodes]
     total_weight = sum(cover_weights.get(v, 1.0) for v in sorted_cover)
@@ -474,7 +515,7 @@ def serve_stdio() -> None:
             result: Any = {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "wyldcam-verification-mcp", "version": "0.2.0"},
+                "serverInfo": {"name": "wyldcam-verification-mcp", "version": "0.2.1"},
             }
             resp = {"jsonrpc": "2.0", "id": req_id, "result": result}
         elif method == "ping":
@@ -529,9 +570,12 @@ def run_selftest() -> None:
     res_leak = scan_zero_leak(f"Loaded config from {sample_path}")
     assert res_leak["clean"] is False and res_leak["finding_count"] == 1, res_leak
 
+    placeholder_doc = "Audits paths like C:" + "\\Users\\... and /home/..."
+    assert scan_zero_leak(placeholder_doc)["clean"] is True
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        g_path = tmp / "synthetic_10k.mis"
+        g_path = tmp / "synthetic_10k.mis.gz"
         w_path = tmp / "synthetic_10k.sol"
 
         lines = ["c Synthetic 10k MWVC streaming test", "p edge 10000 15000"]
@@ -553,7 +597,8 @@ def run_selftest() -> None:
             lines.append(f"e {odd_u} {next_even}")
             lines.append(f"e {odd_u} {next_odd}")
 
-        g_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with gzip.open(g_path, "wt", encoding="utf-8") as gz_out:
+            gz_out.write("\n".join(lines) + "\n")
         w_lines = ["c 1-minimal witness", f"s vc 10000 {len(cover_ids)}"] + [str(v) for v in cover_ids]
         w_path.write_text("\n".join(w_lines) + "\n", encoding="utf-8")
 
@@ -563,11 +608,19 @@ def run_selftest() -> None:
         assert res_stream["cover_size"] == 5000, res_stream
         assert res_stream["edge_records_verified"] == 15000, res_stream
         assert res_stream["total_weight"] == expected_weight, res_stream
-        assert res_stream["graph_file"] == "synthetic_10k.mis", res_stream
-        leak_audit = scan_zero_leak(json.dumps(res_stream))
-        assert leak_audit["clean"] is True, leak_audit
+        assert res_stream["graph_file"] == "synthetic_10k.mis.gz", res_stream
+        assert scan_zero_leak(json.dumps(res_stream))["clean"] is True
 
-    print("[PASS] graph_witness_mcp.py (v0.2.0): all 5 deterministic & 10k-streaming self-tests passed.")
+        bundle_path = tmp / "bundle_0idx.json"
+        bundle_path.write_text(
+            json.dumps({"edges": [[0, 1], [1, 2], [2, 0]], "weights": [4, 7, 9], "selected_vertices": [0, 1]}),
+            encoding="utf-8",
+        )
+        res_bundle = verify_witness_file(str(bundle_path), str(bundle_path))
+        assert res_bundle["valid_cover"] is True and res_bundle["is_1_minimal"] is True, res_bundle
+        assert res_bundle["total_weight"] == 11, res_bundle
+
+    print("[PASS] graph_witness_mcp.py (v0.2.1): all 6 deterministic, .gz streaming & JSON bundle self-tests passed.")
 
 
 if __name__ == "__main__":
