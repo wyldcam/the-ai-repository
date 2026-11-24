@@ -1,7 +1,7 @@
 /-
   VertexCoverSoundness.lean
   Formal specification of NP Vertex Cover feasibility and strict weight-monotone
-  redundancy pruning (matching `mcp-servers/graph_witness_mcp.py`).
+  redundancy pruning (formalizing post-solve witness cover-preservation checks).
   Zero external dependencies (pure Lean 4 core).
 -/
 
