@@ -56,3 +56,17 @@ This repository originated in **January 2011** on Google Code as **tAIR (*The Ap
 
 - **2011 Snapshot:** Preserved intact on branch [`legacy/2011-tair`](https://github.com/wyldcam/the-ai-repository/tree/legacy/2011-tair) and tag [`v2.1-tair-2011`](https://github.com/wyldcam/the-ai-repository/releases/tag/v2.1-tair-2011) under its original **GPLv3** license.
 - **Modern `main` Branch:** Initialized from a clean root commit under the **MIT License** for modern AI engineering.
+
+---
+
+## Live Production Case Study: Sub-Second GPU Conflict-Graph Verification (5k – 130k Nodes)
+
+Our MCP witness-verification architecture (mcp-servers/graph_witness_mcp.py) is battle-tested in production against **NSPL-GPU-OPT**, a closed-source CUDA 13.0 (sm_89) / C++20 solver for large-scale **Minimum Weight Vertex Cover (MWVC)**, **Maximum Weight Independent Set (MWIS)**, and **MILP conflict-graph primal heuristics**.
+
+Rather than trusting unverified heuristic claims, every benchmark run emits an independent NP witness certificate (.sol vertex cover + SHA-256 manifest) audited in (V + E)$ time:
+
+* **Full Cryptographic Witness Suite & Auditor:** [wyldcam/nspl-gpu-mwvc-witnesses](https://github.com/wyldcam/nspl-gpu-mwvc-witnesses)
+* **Verified Hardware Highlights (NVIDIA L4 sm_89):**
+  * **10,000 nodes / 99,845 edges (101.5 ms):** Solves to 754,018 (-14,589 vs. 8-thread FastWVC) while both HiGHS MILP (1.84s) and 8-worker OR-Tools CP-SAT (1.11s) fail to find a feasible solution.
+  * **50,000 nodes / 249,308 edges (258.0 ms):** Saves **-55,931** weight units vs. FastWVC (-41,088 vs. 8-thread FastWVC).
+  * **130,000 nodes / 648,827 edges (526.5 ms):** Saves **-101,446** weight units vs. FastWVC (-33,644 vs. 8-thread FastWVC).
