@@ -4,6 +4,8 @@ __pycache__/
 .env
 node_modules/
 .DS_Store
+_site_docs/
+site/
 .vscode/*
 !.vscode/mcp.json
 .cursor/*

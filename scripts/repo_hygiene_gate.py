@@ -25,7 +25,7 @@ FORBIDDEN_EXTENSIONS = {
     ".pt", ".pth", ".onnx", ".safetensors", ".pem", ".key", ".pfx", ".p12",
 }
 FORBIDDEN_FILENAMES = {".env", ".env.local", ".env.production"}
-TRANSIENT_BUILDERS = {"setup_ci.py", "upgrade_v020.py", "seed_artifacts.py", "clean_and_read.py", "upgrade_v030.py"}
+TRANSIENT_BUILDERS = {"setup_ci.py", "upgrade_v020.py", "seed_artifacts.py", "clean_and_read.py", "upgrade_v030.py", "setup_pages_and_quickstart.py"}
 MCP_CONFIG_PATHS = {".mcp.json", ".vscode/mcp.json", ".cursor/mcp.json", ".gemini/settings.json"}
 ABS_PATH_RE = re.compile(r"(^[A-Za-z]:[\\/]|^/(?:Users|home|root|opt|var)/)")
 MAX_FILE_BYTES = 1_048_576

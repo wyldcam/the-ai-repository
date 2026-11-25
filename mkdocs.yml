@@ -1,0 +1,56 @@
+site_name: The AI Repository — wyldcam
+site_description: Zero-dependency MCP verification servers, 5k-130k NP witness auditors, zero-drift prompt contracts, and technical briefs.
+site_url: https://wyldcam.github.io/the-ai-repository/
+repo_url: https://github.com/wyldcam/the-ai-repository
+repo_name: wyldcam/the-ai-repository
+
+docs_dir: _site_docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+markdown_extensions:
+  - tables
+  - admonition
+  - attr_list
+  - fenced_code
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Overview: index.md
+  - 60s Evaluator Quickstart: quickstart.md
+  - Tooling & Schemas:
+      - MCP Verification Server: mcp-server.md
+      - Zero-Drift Prompt Pack: zero-drift-pack.md
+      - Deterministic Agent Harness: agent-harness.md
+  - Research & Proofs:
+      - "Brief #001: Asymmetric Verification": research/001-asymmetric-witness-verification.md
+      - Lean 4 Soundness Proof: research/formal-verification.md
